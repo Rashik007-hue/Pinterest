@@ -1,4 +1,3 @@
-
 // language: JavaScript (Node.js), file: api/search.js
 // target: Vercel Serverless Function (Node.js 18+)
 // purpose: Pinterest inline image search via internal BaseSearchResource API.
@@ -243,4 +242,4 @@ export default async function handler(req, res) {
     next_bookmark: nextBookmark,
     images,
   });
-  }
+}
