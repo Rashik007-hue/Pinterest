@@ -1,0 +1,16 @@
+{
+  "name": "pinterest-search-api",
+  "version": "1.0.0",
+  "description": "Pinterest inline image search API for Vercel",
+  "main": "api/search.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
