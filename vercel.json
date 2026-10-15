@@ -1,15 +1,16 @@
 {
-"version": 2,
-"builds": [
-{
-"src": "api/index.py",
-"use": "@vercel/python"
-}
-],
-"routes": [
-{
-"src": "/(.*)",
-"dest": "api/index.py"
-}
-]
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/search", "destination": "/api/search" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+      ]
+    }
+  ]
 }
