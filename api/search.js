@@ -1,8 +1,7 @@
 // language: JavaScript (Node.js), file: api/search.js
 // target: Vercel Serverless Function (Node.js 18+)
 // purpose: Pinterest inline image search via internal BaseSearchResource API.
-//          Returns normalized JSON: [{ id, image, thumbnail, title, link }]
-//          No API key, no login, no OAuth — mimics browser requests.
+//          Returns normalized JSON with owner tag.
 
 // ---------------------------------------------------------------------------
 // CONFIG
@@ -14,7 +13,12 @@ const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 50;
 const REQUEST_TIMEOUT_MS = 12000;
 
-// Browser-mimicking headers — critical. Pinterest blocks bare requests.
+// ---------------------------------------------------------------------------
+// OWNER — appears in every JSON response
+// ---------------------------------------------------------------------------
+
+const OWNER = "@RASHIK_69";
+
 const BROWSER_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -37,10 +41,6 @@ const BROWSER_HEADERS = {
 // HELPERS
 // ---------------------------------------------------------------------------
 
-/**
- * Build the Pinterest resource URL with query params.
- * Format: /resource/BaseSearchResource/get/?source_url=...&data=...&_=...
- */
 function buildResourceUrl(query, pageSize, bookmark, scope = "pins") {
   const sourceUrl = `/search/${scope}/?q=${encodeURIComponent(query)}`;
 
@@ -65,24 +65,15 @@ function buildResourceUrl(query, pageSize, bookmark, scope = "pins") {
   return `${PINTEREST_BASE}/resource/${SEARCH_RESOURCE}/get/?${params.toString()}`;
 }
 
-/**
- * Extract the best image URL from a Pinterest pin object.
- * Pinterest serves multiple resolutions; we pick the highest available.
- */
 function pickBestImage(pin) {
   const images = pin.images || {};
-  // order from highest to lowest quality
   const order = ["orig", "736x", "564x", "474x", "236x", "170x"];
   for (const key of order) {
     if (images[key]?.url) return images[key].url;
   }
-  // fallback
   return pin.image || pin.image_url || null;
 }
 
-/**
- * Extract a thumbnail (smaller, for preview lists).
- */
 function pickThumbnail(pin) {
   const images = pin.images || {};
   const order = ["236x", "170x", "474x"];
@@ -92,12 +83,9 @@ function pickThumbnail(pin) {
   return pickBestImage(pin);
 }
 
-/**
- * Normalize a raw Pinterest pin into a clean object.
- */
 function normalizePin(pin) {
   const image = pickBestImage(pin);
-  if (!image) return null; // skip pins without images
+  if (!image) return null;
 
   return {
     id: pin.id || null,
@@ -113,9 +101,6 @@ function normalizePin(pin) {
   };
 }
 
-/**
- * Fetch with timeout using AbortController.
- */
 async function fetchWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -132,7 +117,6 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 // ---------------------------------------------------------------------------
 
 export default async function handler(req, res) {
-  // CORS preflight
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -141,13 +125,16 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed. Use GET." });
+    return res.status(405).json({
+      owner: OWNER,
+      error: "Method not allowed. Use GET.",
+    });
   }
 
-  // --- parse query params ---
   const query = (req.query.q || req.query.query || "").trim();
   if (!query) {
     return res.status(400).json({
+      owner: OWNER,
       error: "Missing query parameter.",
       usage: "/api/search?q=flowers&limit=25",
     });
@@ -160,7 +147,6 @@ export default async function handler(req, res) {
   const bookmark = (req.query.bookmark || "").trim() || null;
   const scope = (req.query.scope || "pins").trim();
 
-  // --- build URL and fetch ---
   const url = buildResourceUrl(query, limit, bookmark, scope);
 
   let pinterestRes;
@@ -177,6 +163,7 @@ export default async function handler(req, res) {
   } catch (err) {
     const reason = err.name === "AbortError" ? "timeout" : err.message;
     return res.status(502).json({
+      owner: OWNER,
       error: "Upstream request failed.",
       reason,
       hint: "Pinterest may be rate-limiting this server's IP. Retry later.",
@@ -185,6 +172,7 @@ export default async function handler(req, res) {
 
   if (!pinterestRes.ok) {
     return res.status(pinterestRes.status).json({
+      owner: OWNER,
       error: "Pinterest returned non-200.",
       status: pinterestRes.status,
       hint:
@@ -194,21 +182,21 @@ export default async function handler(req, res) {
     });
   }
 
-  // --- parse JSON ---
   let raw;
   try {
     raw = await pinterestRes.json();
   } catch (err) {
     return res.status(502).json({
+      owner: OWNER,
       error: "Pinterest returned invalid JSON.",
       reason: err.message,
     });
   }
 
-  // Pinterest nests the payload under resource_response.data
   const data = raw?.resource_response?.data;
   if (!data || !Array.isArray(data.results)) {
     return res.status(200).json({
+      owner: OWNER,
       success: true,
       query,
       count: 0,
@@ -218,24 +206,22 @@ export default async function handler(req, res) {
     });
   }
 
-  // --- normalize ---
   const images = data.results
     .map(normalizePin)
-    .filter(Boolean) // drop pins without images
+    .filter(Boolean)
     .slice(0, limit);
 
-  // bookmarks for pagination
   const nextBookmark =
     raw?.resource_response?.bookmark ||
     data.bookmark ||
     (data.bookmarks && data.bookmarks[0]) ||
     null;
 
-  // --- respond ---
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
 
   return res.status(200).json({
+    owner: OWNER,
     success: true,
     query,
     count: images.length,
